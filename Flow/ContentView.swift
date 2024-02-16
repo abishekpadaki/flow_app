@@ -1,7 +1,7 @@
 import SwiftUI
 import UserNotifications
 
-struct ToDoItem: Identifiable {
+struct ToDoItem: Identifiable, Codable {
     var id = UUID()
     var title: String
     var dueDate: Date
@@ -9,11 +9,38 @@ struct ToDoItem: Identifiable {
     var isCompleted: Bool = false
 }
 
+
 struct ToDoList: View {
     @State private var toDoItems = [ToDoItem]()
     @State private var newToDoTitle = ""
     @State private var newToDoReminderTime = Date()
     
+    private func taskCard(item: ToDoItem) -> some View {
+            VStack(alignment: .leading, spacing: 8) { // Adjust spacing inside each card
+                HStack {
+                    Text(item.title)
+                        .fontWeight(.bold)
+                    Spacer()
+                    Button(action: {
+                        markAsCompleted(item: item)
+                    }) {
+                        Image(systemName: "checkmark.circle")
+                    }
+                }
+                DatePicker("Reminder", selection: Binding(get: {
+                    toDoItems.first(where: { $0.id == item.id })?.reminderTime ?? Date()
+                }, set: { newTime in
+                    if let index = toDoItems.firstIndex(where: { $0.id == item.id }) {
+                        toDoItems[index].reminderTime = newTime
+                    }
+                }), displayedComponents: .hourAndMinute)
+            }
+            .padding() // Padding inside the card
+            .background(RoundedRectangle(cornerRadius: 10) // Rounded corners for the card
+                            .fill(Color(UIColor.secondarySystemBackground)) // Background color of the card
+                            .shadow(radius: 5)) // Shadow for card-like appearance
+            .padding(.horizontal) // Padding on each side of the card for spacing from screen edges
+        }
     private func requestNotificationPermissions() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if granted {
@@ -26,44 +53,33 @@ struct ToDoList: View {
 
     var body: some View {
         NavigationView {
-            List {
-                ForEach(toDoItems) { item in
-                    if !item.isCompleted {
-                        HStack {
-                            Text(item.title)
-                            Spacer()
-                            Button(action: {
-                                markAsCompleted(item: item)
-                            }) {
-                                Image(systemName: "checkmark.circle")
+            
+            ScrollView {
+                
+                            LazyVStack(spacing: 10) { // Control spacing between cards
+                                HStack {
+                                            TextField("New To-Do Item", text: $newToDoTitle)
+                                            DatePicker("Time:", selection: $newToDoReminderTime, displayedComponents: .hourAndMinute)
+                                            Button(action: {
+                                                addNewItem()
+                                            }) {
+                                                Image(systemName: "plus")
+                                            }
+                                }.padding()
+                                
+                                ForEach(toDoItems) { item in
+                                    if !item.isCompleted {
+                                        taskCard(item: item)
+                                    }
+                                }
                             }
+                            .padding() // Add padding around the stack for better appearance
                         }
-                        .transition(.opacity)
-                        DatePicker("Reminder", selection: Binding(get: {
-                            toDoItems.first(where: { $0.id == item.id })?.reminderTime ?? Date()
-                        }, set: { newTime in
-                            if let index = toDoItems.firstIndex(where: { $0.id == item.id }) {
-                                toDoItems[index].reminderTime = newTime
-                            }
-                        }), displayedComponents: .hourAndMinute)
-                    }
-                }
-                .onDelete(perform: deleteItems)
-                HStack {
-                    TextField("New To-Do Item", text: $newToDoTitle)
-                    DatePicker("Time:", selection: $newToDoReminderTime, displayedComponents: .hourAndMinute)
-                    Button(action: {
-                        addNewItem()
-                    }) {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
             .navigationBarTitle("Flow.")
         }.onAppear {
             self.requestNotificationPermissions()
+            self.loadTasks()
         }
-        .environment(\.colorScheme, .dark)
     }
     
     private func markAsCompleted(item: ToDoItem) {
@@ -73,7 +89,8 @@ struct ToDoList: View {
             // Delay removal to allow for animation
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 withAnimation {
-                    toDoItems.removeAll { $0.id == item.id }
+                    self.toDoItems.removeAll { $0.id == item.id }
+                    self.saveTasks()
                 }
             }
         }
@@ -81,7 +98,22 @@ struct ToDoList: View {
     
     private func deleteItems(at offsets: IndexSet) {
         toDoItems.remove(atOffsets: offsets)
+        saveTasks()
     }
+    
+    func saveTasks() {
+        if let encoded = try? JSONEncoder().encode(toDoItems) {
+            UserDefaults.standard.set(encoded, forKey: "ToDoItems")
+        }
+    }
+    
+    func loadTasks() {
+        if let savedItems = UserDefaults.standard.data(forKey: "ToDoItems"),
+           let decodedItems = try? JSONDecoder().decode([ToDoItem].self, from: savedItems) {
+            toDoItems = decodedItems
+        }
+    }
+
     
     private func scheduleNotification(for item: ToDoItem) {
         let content = UNMutableNotificationContent()
@@ -112,6 +144,7 @@ struct ToDoList: View {
             scheduleNotification(for: newToDoItem) // Schedule the notification
             newToDoTitle = ""
             newToDoReminderTime = Date()
+            saveTasks()
     }
 }
 
